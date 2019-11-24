@@ -1,30 +1,62 @@
-для запуска vagrant использовать следующие настройки:
----
-ip: "192.168.10.10"
-memory: 2048
-cpus: 1
-provider: virtualbox
+Vagrantfile
+---------
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
 
-authorize: ~/.ssh/id_rsa.pub
+require 'json'
+require 'yaml'
 
-keys:
-    - ~/.ssh/id_rsa
+VAGRANTFILE_API_VERSION ||= "2"
+confDir = $confDir ||= File.expand_path(File.dirname(__FILE__))
 
-folders:
-    - map: /home/kondratskivd/Laravel/sites
-      to: /home/vagrant/Code
+homesteadYamlPath = confDir + "/Homestead.yaml"
+homesteadJsonPath = confDir + "/Homestead.json"
+afterScriptPath = confDir + "/after.sh"
+customizationScriptPath = confDir + "/user-customizations.sh"
+aliasesPath = confDir + "/aliases"
 
-sites:
-    - map: redwerk.test
-      to: /home/vagrant/Code/RedWerk/public
+require File.expand_path(File.dirname(__FILE__) + '/scripts/homestead.rb')
 
-databases:
-    - redwerk
+Vagrant.require_version '>= 2.2.4'
 
-features:
-    - mariadb: false
-    - ohmyzsh: false
-    - webdriver: false
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+    if File.exist? aliasesPath then
+        config.vm.provision "file", source: aliasesPath, destination: "/tmp/bash_aliases"
+        config.vm.provision "shell" do |s|
+            s.inline = "awk '{ sub(\"\r$\", \"\"); print }' /tmp/bash_aliases > /home/vagrant/.bash_aliases && chown vagrant:vagrant /home/vagrant/.bash_aliases"
+        end
+    end
+
+    if File.exist? homesteadYamlPath then
+        settings = YAML::load(File.read(homesteadYamlPath))
+    elsif File.exist? homesteadJsonPath then
+        settings = JSON::parse(File.read(homesteadJsonPath))
+    else
+        abort "Homestead settings file not found in #{confDir}"
+    end
+
+    Homestead.configure(config, settings)
+
+    if File.exist? afterScriptPath then
+        config.vm.provision "shell", path: afterScriptPath, privileged: false, keep_color: true
+    end
+
+    if File.exist? customizationScriptPath then
+        config.vm.provision "shell", path: customizationScriptPath, privileged: false, keep_color: true
+    end
+
+    if Vagrant.has_plugin?('vagrant-hostsupdater')
+        config.hostsupdater.aliases = settings['sites'].map { |site| site['map'] }
+    elsif Vagrant.has_plugin?('vagrant-hostmanager')
+        config.hostmanager.enabled = true
+        config.hostmanager.manage_host = true
+        config.hostmanager.aliases = settings['sites'].map { |site| site['map'] }
+    end
+
+    if Vagrant.has_plugin?('vagrant-notify-forwarder')
+        config.notify_forwarder.enable = true
+    end
+end
     
 ------------------------
 конфигурация .env
@@ -76,6 +108,7 @@ MIX_PUSHER_APP_CLUSTER="${PUSHER_APP_CLUSTER}"
 
 
 ----------------------
-для установки проэкта
-1. перейти в папку проэкта и запустить команду создания таблиц баз данных - php artisan migtare
-2. сгенерировать тестовые данные в базу, командой - php artisan bd:seed
+для запуска проэкта
+1. перейти в папку проэкта и запустить команду  - composer update
+2. создать таблицы баз данных командой - php artisan migtare
+3. сгенерировать тестовые данные в базу, командой - php artisan bd:seed
